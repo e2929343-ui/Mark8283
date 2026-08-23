@@ -1,0 +1,73 @@
+name: Windows-RDP-Full-Suite
+
+on: workflow_dispatch
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - name: Configure Windows Remote Desktop
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "LicensingMode" -Value 2
+
+    - name: Create Admin User and Security Setup
+      run: |
+        net user Administrator Password1234# /add
+        net localgroup administrators Administrator /add
+        Set-LocalUser -Name "Administrator" -PasswordNeverExpires $true
+        Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name "EnableLUA" -Value 0
+
+    - name: Disable Windows Sleep and Lock Screen
+      run: |
+        powercfg /change monitor-timeout-ac 0
+        powercfg /change disk-timeout-ac 0
+        powercfg /change standby-timeout-ac 0
+        powercfg /change hibernate-timeout-ac 0
+
+    - name: Optimize System Performance
+      run: |
+        Set-ExecutionPolicy Unrestricted -Force
+        Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Power' -Name "HibernateEnabled" -Value 0
+
+    - name: Install Google Chrome Browser
+      run: |
+        $ChromePath = "$env:TEMP\chrome_installer.exe"
+        Invoke-WebRequest -Uri "https://dl.google.com/chrome/install/latest/chrome_installer.exe" -OutFile $ChromePath
+        Start-Process -FilePath $ChromePath -Args "/silent /install" -Verb RunAs -Wait
+
+    - name: Download Tools and Utilities
+      run: |
+        choco install ngrok -y
+        choco install 7zip -y
+
+    - name: Configure Network Firewall Rules
+      run: |
+        New-NetFirewallRule -DisplayName "Allow RDP Port 3389" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+    - name: Apply RDP Performance Tweaks
+      run: |
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fAllowToGetHelp" -Value 0 -PropertyType DWORD -Force
+        New-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fMaxActiveSessions" -Value 0 -PropertyType DWORD -Force
+
+    - name: Start Ngrok Connection Tunnel
+      run: |
+        ngrok config add-authtoken YOUR_NGROK_AUTH_TOKEN
+        Start-Process powershell -ArgumentList '-Noexit -Command "ngrok tcp 3389"'
+
+    - name: Keep Workflow Execution Active
+      run: |
+        Write-Host "RDP Server Status: Active and Running..."
+        $counter = 0
+        while ($counter -lt 360) {
+            Start-Sleep -Seconds 60
+            $counter++
+            Write-Host "Heartbeat check: Server alive for $counter minutes"
+        }
+
+    - name: Finalize Session Cleanup
+      run: |
+        Write-Host "RDP Session completed successfully."
